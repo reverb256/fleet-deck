@@ -42,6 +42,8 @@ func collectK3s() K3sState {
 	// If kubectl emitted only error lines (API down), surface a clean message.
 	cleanNodes := filterKubectlErrors(s.Nodes)
 	s.Nodes = cleanNodes
+	cleanPods := filterKubectlErrors(s.Pods)
+	s.Pods = cleanPods
 
 	return s
 }
