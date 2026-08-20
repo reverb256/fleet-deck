@@ -54,7 +54,8 @@ var (
 	panelTitle = panelTitleStyle
 	statusStyle = lipgloss.NewStyle().Foreground(fgMuted)
 	tabActive   = lipgloss.NewStyle().Foreground(bgBase).Background(accentPrimary).Bold(true).Padding(0, 1)
-	tabIdle     = lipgloss.NewStyle().Foreground(fgMuted).Padding(0, 1)
+	// Idle tabs: underline signals clickable (tui-design: clickable = underline).
+	tabIdle = lipgloss.NewStyle().Foreground(fgMuted).Underline(true).Padding(0, 1)
 )
 
 // Aliases so existing render code keeps working with clearer names.
