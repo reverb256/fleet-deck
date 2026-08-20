@@ -617,8 +617,18 @@ func (m model) renderNowPlaying() string {
 		state = "⏸"
 	}
 	np := fmt.Sprintf("%s %s — %s", state, m.nowPlaying.Title, m.nowPlaying.Artist)
-	if m.nowPlaying.Progress != "" {
-		np += "  [" + m.nowPlaying.Progress + "]"
+	// Progress bar: thin, sub-160ms feel, only on the 2s poll cadence
+	// (position updates arrive with the poll — that's the animation budget).
+	if m.nowPlaying.Length > 0 {
+		pct := float64(m.nowPlaying.Position) / float64(m.nowPlaying.Length) * 100
+		if pct > 100 {
+			pct = 100
+		}
+		bar := gauge(pct, 24)
+		// Time label mm:ss / mm:ss.
+		cur := fmt.Sprintf("%02d:%02d", m.nowPlaying.Position/1e6/60, (m.nowPlaying.Position/1e6)%60)
+		tot := fmt.Sprintf("%02d:%02d", m.nowPlaying.Length/1e6/60, (m.nowPlaying.Length/1e6)%60)
+		np += "  " + bar + " " + cur + "/" + tot
 	}
 	return lipgloss.NewStyle().Foreground(themeGreen).Render(np) + "\n"
 }
