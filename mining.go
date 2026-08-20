@@ -27,15 +27,8 @@ func collectMining() MiningState {
 	var s MiningState
 	for _, name := range miningHostNames {
 		h := MiningHost{Name: name}
-		gpus, err := collectGPU(Host{Name: name, Address: name})
-		if err != nil {
-			h.Err = err.Error()
-			s.Hosts = append(s.Hosts, h)
-			continue
-		}
-		h.GPUs = gpus
-
-		// Hashrate: try miner CLI endpoints (peakminer/trex). Best-effort.
+		// GPU data now comes from the live host poll (m.hosts) — no double
+		// ssh here. Only hashrate is fetched (best-effort, separate call).
 		h.TotalHash, h.HashUnit = collectHashrate(name)
 		s.Hosts = append(s.Hosts, h)
 	}

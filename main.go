@@ -29,6 +29,7 @@ type Host struct {
 	Temp     float64
 	GPU      []GPUInfo
 	Builds   []string
+	latencyMs int64 // collection duration, for the latency footer
 	Err      string
 }
 
@@ -63,6 +64,7 @@ type model struct {
 	scratch    []string
 	scratchBuf string
 	showHelp   bool
+	polling    bool // single-flight guard: a poll cycle is in flight
 	activeTab  int
 	width      int
 	height     int
@@ -107,6 +109,25 @@ func pollHost(h Host) tea.Cmd {
 		data := collectHost(h)
 		return pollMsg{host: h.Name, data: data}
 	}
+}
+
+func (m model) cycleDone() bool {
+	for _, h := range m.hosts {
+		if h.latencyMs == 0 && h.Err == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func (m model) maxLatency() int64 {
+	var max int64
+	for _, h := range m.hosts {
+		if h.latencyMs > max {
+			max = h.latencyMs
+		}
+	}
+	return max
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -194,7 +215,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tickMsg:
-		return m, tea.Batch(pollAll(m.hosts), pollK3sCmd(), pollMiningCmd(), pollSpotifyCmd(), pollAICmd())
+		// Single-flight guard: skip this tick if a poll cycle is still running.
+		if m.polling {
+			return m, nil
+		}
+		m.polling = true
+		// Tab-aware gating: heavy collectors (k3s/mining/ai) only poll while
+		// their tab is visible. Core host poll + spotify always run (cheap).
+		batch := []tea.Cmd{pollAll(m.hosts), pollSpotifyCmd()}
+		switch m.activeTab {
+		case 3:
+			batch = append(batch, pollK3sCmd())
+		case 4:
+			batch = append(batch, pollMiningCmd())
+		case 5:
+			batch = append(batch, pollAICmd())
+		}
+		return m, tea.Batch(batch...)
 	case pollMsg:
 		for i := range m.hosts {
 			if m.hosts[i].Name == msg.host {
@@ -227,11 +264,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.hosts[i] = msg.data
 			}
 		}
+		// Mark cycle complete when all 4 hosts have updated this round.
+		if m.cycleDone() {
+			m.polling = false
+		}
 		return m, nil
 	case k3sMsg:
 		m.k3s = msg.state
 		return m, nil
 	case miningMsg:
+		// miningMsg no longer used for GPU data — hosts carry it. Only
+		// hashrate arrives here (polled at a slower cadence).
 		m.mining = msg.state
 		return m, nil
 	case spotifyMsg:
@@ -290,7 +333,8 @@ func (m model) View() string {
 
 	// Now-playing strip (when available) — always visible at the bottom.
 	np := m.renderNowPlaying()
-	footer := "\n" + np + statusStyle.Render("q quit · Tab switch · 1-8 jump · ? help · 2s refresh")
+	lat := m.maxLatency()
+	footer := "\n" + np + statusStyle.Render(fmt.Sprintf("q quit · Tab switch · 1-8 jump · ? help · poll %dms", lat))
 
 	if m.showHelp {
 		body = m.renderHelp()
@@ -335,15 +379,23 @@ func (m model) renderOverview() string {
 		if h.MemTotal > 0 {
 			memPct = h.MemUsed / h.MemTotal * 100
 		}
-		// Braille CPU sparkline (btop signature) — 12 cells to fit one line.
+		// Braille CPU sparkline (btop signature) — 8 cells to fit one line.
 		cpuLine := ""
 		if hist := m.hist[h.Name]; len(hist) > 0 {
-			cpuLine = styleInfo.Render(brailleLine(hist, 12)) + " "
+			cpuLine = styleInfo.Render(brailleLine(hist, 8)) + " "
 		}
 		// Colored host name + braille graph + all metrics on ONE line (btop density).
 		nameStyle := styleAccent.Render(h.Name)
+		// Truncate long error text to keep the row one line.
+		statusText := status
+		if strings.Contains(statusText, "\n") {
+			statusText = strings.SplitN(statusText, "\n", 2)[0]
+		}
+		if len(statusText) > 30 {
+			statusText = statusText[:30] + "…"
+		}
 		row := fmt.Sprintf(" %s %s cpu%s%5.1f%% mem%s%5.1f/%5.1fG net↓%s↑%s disk%5.1f/%5.1fG %s",
-			nameStyle, cpuLine, btopBar(h.CPU), h.CPU, btopBar(memPct), h.MemUsed, h.MemTotal, fmtNet(h.NetRXRate), fmtNet(h.NetTXRate), h.DiskUsed, h.DiskTotal, status)
+			nameStyle, cpuLine, btopBar(h.CPU), h.CPU, btopBar(memPct), h.MemUsed, h.MemTotal, fmtNet(h.NetRXRate), fmtNet(h.NetTXRate), h.DiskUsed, h.DiskTotal, statusText)
 		rows = append(rows, row)
 	}
 	return panelTitle("fleet overview").Render("fleet overview") + "\n" +
@@ -412,23 +464,28 @@ func (m model) renderK3s() string {
 func (m model) renderMining() string {
 	var b strings.Builder
 	b.WriteString(panelTitle("mining fleet").Render("mining fleet") + "\n")
-	if len(m.mining.Hosts) == 0 {
-		b.WriteString(" (no mining data yet)\n")
-	}
-	for _, h := range m.mining.Hosts {
-		b.WriteString(lipgloss.NewStyle().Foreground(themeYellow).Bold(true).Render(" "+h.Name) + "\n")
-		if h.Err != "" {
-			b.WriteString("  err: " + h.Err + "\n")
+	// GPU data comes from the live host poll (m.hosts); hashrate from m.mining.
+	shown := false
+	for _, h := range m.hosts {
+		if !h.HasGPU || h.Err != "" {
 			continue
 		}
-		for _, g := range h.GPUs {
+		shown = true
+		b.WriteString(lipgloss.NewStyle().Foreground(themeYellow).Bold(true).Render(" "+h.Name) + "\n")
+		for _, g := range h.GPU {
 			line := fmt.Sprintf("  gpu%d %-20s util %5.1f%%  temp %5.1f°C  pow %6.1fW  vram %5.1fGB",
 				g.Index, g.Name, g.Util, g.Temp, g.Power, g.Mem)
 			b.WriteString(line + "\n")
 		}
-		if h.TotalHash > 0 {
-			b.WriteString(fmt.Sprintf("  ⛏ hashrate: %.1f %s\n", h.TotalHash, h.HashUnit))
+		// Hashrate from the separate slow-cadence mining poll.
+		for _, mh := range m.mining.Hosts {
+			if mh.Name == h.Name && mh.TotalHash > 0 {
+				b.WriteString(fmt.Sprintf("  ⛏ hashrate: %.1f %s\n", mh.TotalHash, mh.HashUnit))
+			}
 		}
+	}
+	if !shown {
+		b.WriteString(" (no GPU hosts online)\n")
 	}
 	return panelStyle.Render(b.String())
 }

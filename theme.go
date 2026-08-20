@@ -75,7 +75,7 @@ var (
 			BorderForeground(bgSel).
 			Padding(0, 1)
 	overviewStyle = lipgloss.NewStyle().
-			Width(110).
+			Width(118).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(bgSel).
 			Padding(0, 1)
