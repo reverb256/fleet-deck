@@ -74,7 +74,20 @@ var braillePatterns = []string{
 }
 
 // brailleLine renders vals (0..100) as a single braille row of `width` cells.
-// Each cell: bottom dot for low value, top dot for high value (like btop).
+// Proper 2x4 braille: each cell's dot column position encodes the value height
+// (bottom dot = low, top dot = high), so flat AND varying data both read as a
+// graph with real shape (not a repeated glyph).
+var brailleGlyphs = []string{
+	"⣀", // 0-12%  (bottom dots)
+	"⣠", // 13-25%
+	"⣤", // 26-37%
+	"⣦", // 38-50%
+	"⣶", // 51-62%
+	"⣾", // 63-75%
+	"⣷", // 76-87%
+	"⣿", // 88-100% (full)
+}
+
 func brailleLine(vals []float64, width int) string {
 	if len(vals) == 0 || width <= 0 {
 		return strings.Repeat(" ", width)
@@ -91,12 +104,11 @@ func brailleLine(vals []float64, width int) string {
 		if v > 100 {
 			v = 100
 		}
-		// Map 0..100 → braille char (bottom→top).
-		idx := int(v / 100.0 * 11.99)
-		if idx >= len(braillePatterns) {
-			idx = len(braillePatterns) - 1
+		idx := int(v / 100.0 * 7.99)
+		if idx >= len(brailleGlyphs) {
+			idx = len(brailleGlyphs) - 1
 		}
-		out = append(out, braillePatterns[idx])
+		out = append(out, brailleGlyphs[idx])
 	}
 	return strings.Join(out, "")
 }

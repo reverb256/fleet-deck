@@ -150,14 +150,15 @@ func collectHost(h Host) Host {
 		if len(f) < 6 {
 			continue
 		}
-		idx, _ := strconv.Atoi(f[0])
-		util, _ := strconv.ParseFloat(f[2], 64)
-		temp, _ := strconv.ParseFloat(f[3], 64)
-		power, _ := strconv.ParseFloat(f[4], 64)
-		mem, _ := strconv.ParseFloat(f[5], 64)
+		// nvidia-smi CSV pads fields with spaces — TrimSpace before parse.
+		idx, _ := strconv.Atoi(strings.TrimSpace(f[0]))
+		util, _ := strconv.ParseFloat(strings.TrimSpace(f[2]), 64)
+		temp, _ := strconv.ParseFloat(strings.TrimSpace(f[3]), 64)
+		power, _ := strconv.ParseFloat(strings.TrimSpace(f[4]), 64)
+		mem, _ := strconv.ParseFloat(strings.TrimSpace(f[5]), 64)
 		h.GPU = append(h.GPU, GPUInfo{
 			Index: idx,
-			Name:  f[1],
+			Name:  strings.TrimSpace(f[1]),
 			Util:  util,
 			Temp:  temp,
 			Power: power,

@@ -65,6 +65,7 @@ type model struct {
 	scratchBuf string
 	showHelp   bool
 	polling    bool // single-flight guard: a poll cycle is in flight
+	flash      map[string]time.Time // host → time its status changed (for flash anim)
 	activeTab  int
 	width      int
 	height     int
@@ -81,6 +82,7 @@ func initialModel() model {
 		},
 		scratch: loadScratch(),
 		hist:    map[string][]float64{},
+		flash:   map[string]time.Time{},
 	}
 }
 
@@ -250,6 +252,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.prevHosts == nil {
 					m.prevHosts = map[string]Host{}
 				}
+				// Status-change flash: err appears or clears → note the time.
+				if prev, ok := m.prevHosts[msg.host]; ok {
+					prevErr := prev.Err != ""
+					newErr := msg.data.Err != ""
+					if prevErr != newErr {
+						if m.flash == nil {
+							m.flash = map[string]time.Time{}
+						}
+						m.flash[msg.host] = time.Now()
+					}
+				}
 				m.prevHosts[msg.host] = msg.data
 				// Append CPU sample to history (cap at 60 = 2 min).
 				if m.hist == nil {
@@ -386,6 +399,11 @@ func (m model) renderOverview() string {
 		}
 		// Colored host name + braille graph + all metrics on ONE line (btop density).
 		nameStyle := styleAccent.Render(h.Name)
+		// Status-change flash: reverse-video the host name for 1.5s after the
+		// host's err state flips (the ONE legitimate animation — state change).
+		if t, ok := m.flash[h.Name]; ok && time.Since(t) < 1500*time.Millisecond {
+			nameStyle = lipgloss.NewStyle().Reverse(true).Foreground(themeAccent).Bold(true).Render(h.Name)
+		}
 		// Truncate long error text to keep the row one line.
 		statusText := status
 		if strings.Contains(statusText, "\n") {
@@ -413,7 +431,7 @@ func (m model) renderHosts() string {
 		lines = append(lines, fmt.Sprintf("net: ↓%s  ↑%s", fmtNet(h.NetRXRate), fmtNet(h.NetTXRate)))
 		lines = append(lines, fmt.Sprintf("disk: %5.1f / %5.1f GB", h.DiskUsed, h.DiskTotal))
 		for _, g := range h.GPU {
-			lines = append(lines, fmt.Sprintf("gpu%d %s: %5.1f%% util %5.1f°C %6.1fW vram %4.1fGB", g.Index, g.Name, g.Util, g.Temp, g.Power, g.Mem))
+			lines = append(lines, fmt.Sprintf("gpu%d %s: %5.1f%% util %5.1f°C %6.1fW vram %4.1fGB", g.Index, g.Name, g.Util, g.Temp, g.Power, g.Mem/1024))
 		}
 		if h.Err != "" {
 			lines = append(lines, "err: "+h.Err)
@@ -473,8 +491,16 @@ func (m model) renderMining() string {
 		shown = true
 		b.WriteString(lipgloss.NewStyle().Foreground(themeYellow).Bold(true).Render(" "+h.Name) + "\n")
 		for _, g := range h.GPU {
-			line := fmt.Sprintf("  gpu%d %-20s util %5.1f%%  temp %5.1f°C  pow %6.1fW  vram %5.1fGB",
-				g.Index, g.Name, g.Util, g.Temp, g.Power, g.Mem)
+			// Util bar + temp colored by threshold.
+			utilBar := btopBar(g.Util)
+			tempStyle := styleOK
+			if g.Temp >= 80 {
+				tempStyle = styleErr
+			} else if g.Temp >= 60 {
+				tempStyle = styleWarn
+			}
+			line := fmt.Sprintf("  gpu%d %-20s util%s%5.1f%%  %s  pow %6.1fW  vram %5.1fGB",
+				g.Index, g.Name, utilBar, g.Util, tempStyle.Render(fmt.Sprintf("%5.1f°C", g.Temp)), g.Power, g.Mem/1024)
 			b.WriteString(line + "\n")
 		}
 		// Hashrate from the separate slow-cadence mining poll.
