@@ -1,0 +1,7 @@
+# build artifacts
+/fleet-deck
+/result
+*.test
+
+# scratch data (local, not source)
+.thoughts.md
