@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestNetRateDelta(t *testing.T) {
+	skipIfNotLive(t)
 	h1 := collectHost(Host{Name: "sentry", Address: "sentry", HasGPU: false})
 	t.Logf("poll1 netRX=%.0f netTX=%.0f", h1.NetRX, h1.NetTX)
 	h2 := collectHost(Host{Name: "sentry", Address: "sentry", HasGPU: false})

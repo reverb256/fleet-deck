@@ -5,6 +5,7 @@ import (
 )
 
 func TestGPUValuesParse(t *testing.T) {
+	skipIfNotLive(t)
 	h := collectHost(Host{Name: "zephyr", Address: "zephyr", HasGPU: true})
 	if len(h.GPU) == 0 {
 		t.Fatal("expected GPUs on zephyr")

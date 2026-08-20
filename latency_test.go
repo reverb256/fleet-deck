@@ -7,6 +7,7 @@ import (
 
 // Verify full collection on all hosts (with GPU on forge/zephyr).
 func TestFullCollection(t *testing.T) {
+	skipIfNotLive(t)
 	for _, name := range []string{"zephyr", "nexus", "sentry", "forge"} {
 		_, _ = poolFor(name).run("echo warm", 3*time.Second)
 		start := time.Now()

@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestCollectAI(t *testing.T) {
+	skipIfNotLive(t)
 	s := collectAI()
 	t.Logf("servers=%d procs=%d", len(s.Servers), len(s.Procs))
 	for _, sv := range s.Servers {
@@ -14,6 +15,7 @@ func TestCollectAI(t *testing.T) {
 }
 
 func TestCollectK3s(t *testing.T) {
+	skipIfNotLive(t)
 	k := collectK3s()
 	t.Logf("nodes=%d pods=%d err=%q", len(k.Nodes), len(k.Pods), k.Err)
 	for _, n := range k.Nodes {
