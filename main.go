@@ -55,8 +55,9 @@ type tickMsg struct{}
 
 type model struct {
 	hosts      []Host
-	prevHosts  map[string]Host     // for net-rate deltas
+	prevHosts  map[string]Host      // for net-rate deltas
 	hist       map[string][]float64 // recent CPU% samples per host (braille graphs)
+	histMem    map[string][]float64 // recent mem% samples per host (2nd braille row)
 	k3s        K3sState
 	mining     MiningState
 	nowPlaying NowPlaying
@@ -82,6 +83,7 @@ func initialModel() model {
 		},
 		scratch: loadScratch(),
 		hist:    map[string][]float64{},
+		histMem: map[string][]float64{},
 		flash:   map[string]time.Time{},
 	}
 }
@@ -270,9 +272,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.prevHosts[msg.host] = msg.data
-				// Append CPU sample to history (cap at 60 = 2 min).
+				// Append CPU + mem samples to history (cap at 60 = 2 min).
 				if m.hist == nil {
 					m.hist = map[string][]float64{}
+					m.histMem = map[string][]float64{}
 				}
 				h := m.hist[msg.host]
 				h = append(h, msg.data.CPU)
@@ -280,6 +283,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					h = h[len(h)-60:]
 				}
 				m.hist[msg.host] = h
+				hm := m.histMem[msg.host]
+				memPct := 0.0
+				if msg.data.MemTotal > 0 {
+					memPct = msg.data.MemUsed / msg.data.MemTotal * 100
+				}
+				hm = append(hm, memPct)
+				if len(hm) > 60 {
+					hm = hm[len(hm)-60:]
+				}
+				m.histMem[msg.host] = hm
 				m.hosts[i] = msg.data
 			}
 		}
@@ -398,10 +411,14 @@ func (m model) renderOverview() string {
 		if h.MemTotal > 0 {
 			memPct = h.MemUsed / h.MemTotal * 100
 		}
-		// Braille CPU sparkline (btop signature) — 8 cells to fit one line.
+		// Two-row braille graph (btop real graphs): CPU row + mem row.
 		cpuLine := ""
+		memLine := ""
 		if hist := m.hist[h.Name]; len(hist) > 0 {
 			cpuLine = styleInfo.Render(brailleLine(hist, 8)) + " "
+		}
+		if hm := m.histMem[h.Name]; len(hm) > 0 {
+			memLine = styleOK.Render(brailleLine(hm, 8)) + " "
 		}
 		// Colored host name + braille graph + all metrics on ONE line (btop density).
 		nameStyle := styleAccent.Render(h.Name)
@@ -418,9 +435,10 @@ func (m model) renderOverview() string {
 		if len(statusText) > 30 {
 			statusText = statusText[:30] + "…"
 		}
-		row := fmt.Sprintf(" %s %s cpu%s%5.1f%% mem%s%5.1f/%5.1fG net↓%s↑%s disk%5.1f/%5.1fG %s",
-			nameStyle, cpuLine, btopBar(h.CPU), h.CPU, btopBar(memPct), h.MemUsed, h.MemTotal, fmtNet(h.NetRXRate), fmtNet(h.NetTXRate), h.DiskUsed, h.DiskTotal, statusText)
-		rows = append(rows, row)
+		row := fmt.Sprintf(" %s %scpu%s%5.1f%%  net↓%s↑%s disk%5.1f/%5.1fG %s",
+			nameStyle, cpuLine, btopBar(h.CPU), h.CPU, fmtNet(h.NetRXRate), fmtNet(h.NetTXRate), h.DiskUsed, h.DiskTotal, statusText)
+		row2 := fmt.Sprintf("    %smem%s%5.1f/%5.1fG", memLine, btopBar(memPct), h.MemUsed, h.MemTotal)
+		rows = append(rows, row+"\n"+styleMuted.Render(row2))
 	}
 	return panelTitle("fleet overview").Render("fleet overview") + "\n" +
 		overviewStyle.Render(strings.Join(rows, "\n"))
