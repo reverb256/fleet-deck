@@ -90,6 +90,12 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		tickEvery(),
 		pollAll(m.hosts),
+		// Seed the gated collectors once so their tabs have data on first
+		// open (recurring polls are tab-gated for efficiency).
+		pollK3sCmd(),
+		pollMiningCmd(),
+		pollAICmd(),
+		pollSpotifyCmd(),
 	)
 }
 
@@ -525,13 +531,44 @@ func (m model) renderAI() string {
 	if len(m.ai.Servers) > 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(themeCyan).Render(" SERVERS") + "\n")
 		for _, s := range m.ai.Servers {
-			b.WriteString(fmt.Sprintf("  %-8s %-12s %-16s %s\n", s.Host, s.Name, s.Model, s.State))
+			// Model chips: each model id as a styled tag.
+			stateChip := styleOK.Render(" ● ")
+			if s.State == "idle" {
+				stateChip = styleMuted.Render(" ○ ")
+			}
+			host := styleAccent.Render(s.Name) // server type chip
+			chips := ""
+			if s.Model != "" {
+				models := strings.Split(s.Model, ", ")
+				parts := make([]string, 0, len(models))
+				for _, mm := range models {
+					if mm == "" {
+						continue
+					}
+					parts = append(parts, lipgloss.NewStyle().Foreground(fgDefault).Background(bgSel).Padding(0, 1).Render(" "+mm+" "))
+				}
+				chips = strings.Join(parts, " ")
+			}
+			b.WriteString(fmt.Sprintf("  %s %-8s %s %s\n", stateChip, s.Host, host, chips))
 		}
 	}
 	if len(m.ai.Procs) > 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(themeCyan).Render(" PROCESSES") + "\n")
 		for _, p := range m.ai.Procs {
-			b.WriteString("  " + p + "\n")
+			// Shorten: host:pid + cmd name (first path basename after etime).
+			fields := strings.Fields(p)
+			if len(fields) >= 4 {
+				proc := fields[0] // host:pid
+				// The cmd is the 4th field; basename it.
+				cmdPath := fields[3]
+				cmdName := cmdPath
+				if i := strings.LastIndex(cmdPath, "/"); i >= 0 {
+					cmdName = cmdPath[i+1:]
+				}
+				b.WriteString(fmt.Sprintf("  %s %s\n", styleMuted.Render(proc), styleOK.Render(cmdName)))
+			} else {
+				b.WriteString("  " + p + "\n")
+			}
 		}
 	}
 	return panelStyle.Render(b.String())
